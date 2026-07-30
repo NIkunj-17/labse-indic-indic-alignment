@@ -1,0 +1,21 @@
+{
+  "model_name_or_path": "sarvamai/sarvam-1",
+  "peft_model_name_or_path": "./labse_research_output/approach_b/sarvam1_bi_mntp",
+  "bidirectional": true,
+  "simcse_dropout": 0.3,
+  "pooling_mode": "mean",
+  "dataset_name": "custom",
+  "dataset_file_path": "./llm2vec_corpus/in22gen_corpus.txt",
+  "learning_rate": 3e-5,
+  "loss_scale": 20,
+  "per_device_train_batch_size": 32,
+  "max_seq_length": 128,
+  "stop_after_n_steps": 2000,
+  "lora_r": 16,
+  "gradient_checkpointing": true,
+  "torch_dtype": "bfloat16",
+  "attn_implementation": "sdpa",
+  "output_dir": "./labse_research_output/approach_b/sarvam1_bi_mntp_simcse",
+  "logging_steps": 50,
+  "seed": 42
+}

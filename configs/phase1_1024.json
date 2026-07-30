@@ -1,0 +1,20 @@
+{
+  "data": {
+    "examples_per_directed_pair": 1024,
+    "train_val_split": 0.90,
+    "seed": 42,
+    "max_seq_length": 128
+  },
+  "train": {
+    "run_name": "phase1_balanced_1024",
+    "init_model": "sentence-transformers/LaBSE",
+    "batch_size": 32,
+    "learning_rate": 2e-6,
+    "epochs": 5,
+    "warmup_ratio": 0.10,
+    "max_grad_norm": 1.0,
+    "checkpoint_every_steps": 500,
+    "checkpoint_keep_last": 2,
+    "use_amp": true
+  }
+}

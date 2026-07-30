@@ -1,0 +1,10 @@
+labse_research_output/
+llm2vec_corpus/
+*.safetensors
+*.bin
+*.pt
+__pycache__/
+*.pyc
+.pytest_cache/
+venv/
+*.egg-info/

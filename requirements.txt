@@ -1,0 +1,17 @@
+torch>=2.0
+sentence-transformers>=3.0
+datasets>=2.19
+transformers>=4.40
+accelerate>=0.30
+huggingface_hub>=0.23
+scikit-learn>=1.3
+pandas>=2.0
+numpy>=1.24
+matplotlib>=3.7
+tqdm>=4.66
+bitsandbytes>=0.43
+peft>=0.11
+sentencepiece>=0.2
+protobuf>=4.25
+evaluate>=0.4
+pytest>=8.0
