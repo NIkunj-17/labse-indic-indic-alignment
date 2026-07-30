@@ -1,0 +1,7 @@
+{
+  "model": "sarvam1_mntp_supervised",
+  "mean_cosine_gap": 0.2875681538215447,
+  "mean_sensitivity": 0.8845944474686989,
+  "mean_specificity": 0.7694221945718952,
+  "mean_accuracy_at_1": 0.37909030424000484
+}
