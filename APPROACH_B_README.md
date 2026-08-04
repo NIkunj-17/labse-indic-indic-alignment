@@ -1,87 +1,123 @@
-# Task 2, Approach B — LLM2Vec Conversion (sarvam-1 → bidirectional encoder)
+# Task 2, Approach B — Converting Sarvam-1 into a Bidirectional Text Encoder using LLM2Vec
 
-## What this does, and why this version of the pipeline
+## Overview
 
-Converts `sarvam-1` (a decoder, Llama-architecture) into a bidirectional
-text encoder via a 3-step recipe:
+This approach converts the decoder-only `sarvam-1` (Llama architecture) into a bidirectional text encoder using the LLM2Vec framework. Unlike the original LLM2Vec pipeline, which applies unsupervised SimCSE after MNTP adaptation, this implementation replaces that stage with supervised contrastive learning using the available IN22-Gen Indic–Indic translation pairs. Consequently, the resulting encoder can be compared directly with the LaBSE-based approach, as both models are trained on the same multilingual dataset.
 
-1. **Enable bidirectional attention + MNTP (Masked Next-Token Prediction)**
-   — the causal mask is removed so every token attends to the full
-   sequence, then a short training stage adapts the model's weights to
-   actually use this new context. Uses the official `llm2vec` library's
-   training script. Trained on a plain-text corpus built from IN22-Gen.
-2. **Merge the MNTP adapter** into a clean base model.
-3. **Supervised contrastive training** on real IN22-Gen Indic-Indic
-   translation pairs — **not** the original LLM2Vec paper's unsupervised
-   SimCSE. SimCSE fabricates positive pairs from dropout noise, which is a
-   substitute for when you don't have labeled data. We do have labeled
-   data (the same pairs used for LaBSE fine-tuning), and LLM2Vec's own
-   paper shows supervised training outperforms unsupervised SimCSE — so we
-   use the stronger signal we already have. This stage reuses the same
-   in-batch-negative contrastive idea as Phase 1/2's training, just
-   implemented directly in PyTorch since the model here doesn't share
-   SentenceTransformer's interface.
+The pipeline consists of three stages:
 
-All training uses LoRA (not full fine-tuning) — cheaper than a full
-retrain, but still real training time on the GPU (see estimates below).
+1. **Bidirectional adaptation via Masked Next-Token Prediction (MNTP)**  
+   The causal attention mask is removed, enabling every token to attend to the entire sequence. A short MNTP training stage then adapts the decoder to exploit this newly introduced bidirectional context. The official LLM2Vec implementation is used for this stage without modification.
 
-## Setup
+2. **Merge the trained MNTP adapter**  
+   The LoRA adapter learned during MNTP training is merged into the base Sarvam-1 model to produce a standalone bidirectional encoder.
+
+3. **Supervised contrastive fine-tuning**  
+   Instead of the original LLM2Vec unsupervised SimCSE stage, this implementation performs supervised contrastive learning using real IN22-Gen Indic–Indic translation pairs. Since high-quality parallel sentence pairs are already available, supervised learning provides a substantially stronger training signal while keeping the remainder of the pipeline unchanged.
+
+Both training stages employ **Low-Rank Adaptation (LoRA)**, enabling parameter-efficient fine-tuning while significantly reducing GPU memory requirements and training time compared to full model fine-tuning.
+
+---
+
+# Setup
 
 ```bash
 cd ~/labse_pipeline
 source venv/bin/activate
 
-# Official LLM2Vec repo -- only needed for its MNTP training script
+# Clone the official LLM2Vec repository
 git clone https://github.com/McGill-NLP/llm2vec.git
+
 cd llm2vec
 pip install -e .
+
 cd ../labse_research
 pip install -e .
-python3 -m pytest tests/ -v   # confirm 12 passed
+
+python3 -m pytest tests/ -v
 ```
 
-## Step 0 — Build the training corpus
+Expected output:
+
+```
+12 passed
+```
+
+---
+
+# Step 0 — Build the MNTP Training Corpus
 
 ```bash
-python3 scripts/prepare_llm2vec_corpus.py --output-dir ./llm2vec_corpus
+python3 scripts/prepare_llm2vec_corpus.py \
+    --output-dir ./llm2vec_corpus
 ```
 
-## Step 1 — MNTP training (bidirectional attention + adaptation)
+This prepares the plain-text corpus derived from IN22-Gen for MNTP training.
 
-**Important: the config file uses paths relative to `~/labse_pipeline/llm2vec/`.**
-This only works correctly if `llm2vec` and `labse_research` are cloned as
-sibling directories under `~/labse_pipeline/` (as the Setup section above
-does), and if you run the command from inside `~/labse_pipeline/llm2vec/`
-exactly as shown below. If your directory layout differs, edit
-`train_configs/mntp/sarvam1_mntp.json`'s `train_file` and `output_dir`
-paths accordingly before running.
+---
 
-Run from inside the cloned `llm2vec` repo:
+# Step 1 — MNTP Training (Bidirectional Adaptation)
+
+> **Important**
+
+The configuration file uses paths relative to `~/labse_pipeline/llm2vec/`.
+
+The commands below assume the following directory structure:
+
+```
+labse_pipeline/
+│
+├── llm2vec/
+└── labse_research/
+```
+
+If your layout differs, update the `train_file` and `output_dir` fields in
+
+```
+train_configs/mntp/sarvam1_mntp.json
+```
+
+before running the experiment.
+
+Execute from inside the cloned **LLM2Vec** repository.
 
 ```bash
 cd ~/labse_pipeline/llm2vec
+
 python3 experiments/run_mntp.py \
     ~/labse_pipeline/labse_research/train_configs/mntp/sarvam1_mntp.json
 ```
 
-**Estimated runtime:** a few hours on the A100 -- real training, budget accordingly.
+**Estimated runtime**
 
-This saves a LoRA adapter (not a full model) to
-`labse_research_output/approach_b/sarvam1_bi_mntp/`.
+Several hours on an NVIDIA A100 GPU.
 
-## Step 2 — Merge the MNTP adapter
+This stage performs actual model training and produces a LoRA adapter at
+
+```
+labse_research_output/
+    approach_b/
+        sarvam1_bi_mntp/
+```
+
+---
+
+# Step 2 — Merge the MNTP Adapter
 
 ```bash
 cd ~/labse_pipeline/labse_research
+
 python3 scripts/merge_mntp_adapter.py \
     --base-model sarvamai/sarvam-1 \
     --mntp-adapter-dir ./labse_research_output/approach_b/sarvam1_bi_mntp \
     --output-dir ./labse_research_output/approach_b/sarvam1_bi_mntp_merged
 ```
 
-Quick step (no training) -- just loads, merges LoRA into base weights, saves.
+This is a lightweight utility step that merges the trained LoRA adapter into the base model weights. No additional training is performed.
 
-## Step 3 — Supervised contrastive training on real Indic-Indic pairs
+---
+
+# Step 3 — Supervised Contrastive Fine-Tuning
 
 ```bash
 python3 scripts/run_approach_b_supervised.py \
@@ -92,72 +128,93 @@ python3 scripts/run_approach_b_supervised.py \
     --epochs 1
 ```
 
-**Estimated runtime:** depends on GPU sharing, but with a small LoRA
-adapter and ~425K pairs at 1 epoch, expect this to be comparable to or
-shorter than your Phase 1 LaBSE run.
+With approximately **425K training pairs** and LoRA-based fine-tuning, this stage typically requires a runtime comparable to or slightly shorter than the corresponding Phase-1 LaBSE fine-tuning experiment.
 
-This reuses `data.py`'s `build_training_examples` directly -- same
-462-pair, 1024-examples-per-pair data as your LaBSE fine-tuning -- so the
-two approaches (encoder vs. this decoder-derived encoder) are trained on
-identical data, making the eventual comparison fair.
+The supervised contrastive stage directly reuses the training examples generated by `build_training_examples()`, ensuring that the same **462 directed language pairs** and **1024 examples per pair** are used as in the LaBSE experiments.
 
-## Step 4 — Evaluate on IN22-Conv
+Consequently, the comparison between
+
+- **Approach A (LaBSE encoder)**
+- **Approach B (Sarvam-derived encoder)**
+
+remains controlled, with the model architecture being the primary experimental variable.
+
+---
+
+# Step 4 — Evaluation on IN22-Conv
 
 ```bash
 python3 scripts/run_approach_b_eval.py \
     --merged-mntp-dir ./labse_research_output/approach_b/sarvam1_bi_mntp_merged \
     --supervised-adapter-dir ./labse_research_output/approach_b/sarvam1_supervised \
     --output-root ./labse_research_output
+```
 
-# Optional: evaluate MNTP-only (before supervised stage) to see each
-# stage's individual contribution -- just omit --supervised-adapter-dir:
+To evaluate the MNTP stage alone, simply omit the supervised adapter.
+
+```bash
 python3 scripts/run_approach_b_eval.py \
     --merged-mntp-dir ./labse_research_output/approach_b/sarvam1_bi_mntp_merged \
     --output-root ./labse_research_output
 ```
 
-Results land under `decoder_approach_b/sarvam1_<stage>/summary.json` and
-`per_pair_results.csv` -- same format as Approach A and your LaBSE
-results, directly comparable.
+Evaluation outputs are stored under
 
-## Config choices and why (for the paper's methodology section)
+```
+decoder_approach_b/
 
-- **Supervised contrastive instead of unsupervised SimCSE** — see
-  rationale above; this is the main deliberate deviation from the
-  original LLM2Vec paper's recipe, and is well-justified given we have
-  labeled data the paper's authors didn't.
-- **LoRA rank 16** — matches the original paper's published configs for
-  comparable model sizes.
-- **bf16 + gradient checkpointing (MNTP stage)** — reduces memory
-  footprint on the shared A100.
-- **`mlm_probability: 0.8`** for MNTP — deliberately high, matching the
-  paper's "all_mask" collator recommendation; more aggressive than
-  standard BERT-style 15%, since the goal is forcing the model to rely on
-  full bidirectional context rather than local cues.
-- **Same 1024-examples-per-pair, 462-pair data as LaBSE fine-tuning** —
-  ensures Approach B is trained on identical data to your encoder
-  baseline, isolating the architecture/method as the variable being
-  tested, not the data.
-- **Temperature 0.05 for InfoNCE** — standard default for this kind of
-  contrastive loss; lower temperature sharpens the separation between
-  positive and negative pairs.
+    sarvam1_mntp/
 
-## An alternative you could try later: unsupervised SimCSE
+    sarvam1_supervised/
+```
 
-The original paper's unsupervised SimCSE config is kept at
-`train_configs/simcse/sarvam1_simcse_ALTERNATIVE_not_used.json` for
-reference, in case you want to compare supervised vs. unsupervised
-contrastive training directly as an ablation for the paper. Not required
-for the main pipeline.
+Each directory contains
 
-## Known follow-ups
+```
+summary.json
 
-- This pipeline currently targets only `sarvam-1` (2B). Approach A showed
-  `sarvam-m` (24B) did not clearly outperform it, so we have not built an
-  Approach B pipeline for `sarvam-m` -- would need meaningfully more GPU
-  time given the trainable footprint even with LoRA at that scale.
-- No repeated-seed run yet, same caveat as Task 1.
-- The supervised contrastive stage currently runs 1 epoch by default --
-  worth checking validation trends before assuming more epochs would help
-  (no built-in validation split in this script yet; could be added if
-  needed for the paper's tuning story).
+per_pair_results.csv
+```
+
+The output format is identical to that used by **Approach A**, allowing direct comparison across all evaluation metrics.
+
+---
+
+# Configuration Choices
+
+- **Supervised contrastive learning** replaces unsupervised SimCSE because high-quality IN22-Gen translation pairs are already available.
+
+- **LoRA (rank = 16)** enables parameter-efficient fine-tuning while remaining consistent with the original LLM2Vec configuration.
+
+- **bf16 with gradient checkpointing** reduces GPU memory consumption during MNTP training.
+
+- **`mlm_probability = 0.8`** follows the LLM2Vec recommendation for aggressive masking during bidirectional adaptation.
+
+- **462 directed language pairs with 1024 examples per pair** ensures a fair comparison with the LaBSE fine-tuning pipeline.
+
+- **Temperature = 0.05** is used for the InfoNCE contrastive objective.
+
+---
+
+# Alternative Experiment
+
+The original LLM2Vec pipeline based on **unsupervised SimCSE** is retained for future comparison.
+
+```
+train_configs/simcse/
+    sarvam1_simcse_ALTERNATIVE_not_used.json
+```
+
+This configuration may be useful for a future ablation study comparing supervised and unsupervised contrastive learning.
+
+---
+
+# Current Limitations and Future Work
+
+- The current implementation targets only **Sarvam-1 (2B)**.
+
+- Extending the pipeline to **Sarvam-M (24B)** would require substantially more GPU resources, even when using LoRA.
+
+- No repeated random-seed experiments have been conducted yet.
+
+- The supervised contrastive stage currently performs **one training epoch**. Future work should investigate the effect of additional epochs using a dedicated validation split to determine the optimal stopping point.
